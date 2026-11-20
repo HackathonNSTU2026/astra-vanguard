@@ -1,13 +1,19 @@
 [project]
-name = "astra-vanguard"
-version = "0.1.0"
-requires-python = ">=3.12"
+name = 'astra-vanguard'
+version = '0.1.0'
+requires-python = '>=3.11'
 dependencies = [
-    "fastapi>=0.165.0",
-    "uvicorn>=0.54.0",
+    'fastapi>=0.165.0',
+    'uvicorn>=0.54.0',
+    'pyyaml>=6.0.2',
+    'scikit-learn>=1.6.1',
+    'python-multipart>=0.0.9',
 ]
 
 [dependency-groups]
 dev = [
-    "ruff>=0.17.6",
+    'ruff>=0.17.6',
 ]
+
+[tool.ruff.format]
+quote-style = 'single'

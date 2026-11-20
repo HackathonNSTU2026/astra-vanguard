@@ -1,1 +1,1 @@
-from .evaluate import score
+from .evaluate import score as score

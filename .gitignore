@@ -57,3 +57,7 @@ venv.bak/
 
 # Ruff stuff:
 .ruff_cache/
+
+# Файлы, создаваемые в рантайме
+temp/
+models/
