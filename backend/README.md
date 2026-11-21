@@ -89,8 +89,7 @@ user_prompt + context
 | Endpoint | Метод | Описание |
 |----------|-------|----------|
 | `GET /health` | GET | Проверка здоровья сервиса |
-| `GET /` | GET | Демонстрационный интерфейс (HTML) |
-| `GET /admin` | GET | Административный интерфейс (HTML) |
+| `GET /openapi.json` | GET | Схема OpenAPI |
 | `GET /admin/policy` | GET | Просмотр текущей политики |
 | `POST /admin/policy/reload` | POST | Перезагрузка политики с диска |
 | `GET /admin/journal?limit=50` | GET | Журнал решений |
@@ -123,13 +122,9 @@ uv run python -m src.api.main --host 127.0.0.1 --port 8000
 PYTHONPATH=/path/to/astra-vanguard uv run python -m src.api.main --host 0.0.0.0 --port 8000
 ```
 
-### Демо-интерфейс
+### Веб-интерфейс
 
-Откройте http://127.0.0.1:8000/ — форма для проверки запросов с выбором роли, истории и вложений.
-
-### Административный интерфейс
-
-Откройте http://127.0.0.1:8000/admin — просмотр политики и журнала решений.
+После запуска API запустите [Svelte-фронтенд](../frontend/README.md). При запуске через Vite форма проверки доступна на http://localhost:5173/, а политика и журнал решений — на http://localhost:5173/admin.
 
 ### Обучение модели
 
