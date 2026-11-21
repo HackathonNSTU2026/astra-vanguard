@@ -69,8 +69,9 @@ class Guard:
 
         from src.policy.environments import detect_environment
 
-        all_text = user_prompt + '\n' + '\n'.join(h.get('content', '') for h in history)
-        env = detect_environment(all_text)
+        # Authorization scope comes from the current requested operation only.
+        # Old messages and attachments are untrusted data, not environment claims.
+        env = detect_environment(user_prompt)
 
         decision = self.decision_maker.make(
             classification=classification,
@@ -78,7 +79,7 @@ class Guard:
             user_prompt=user_prompt,
             history=history,
             attachments=attachments,
-            env_text=all_text,
+            env_text=user_prompt,
             target_agent=target_agent,
         )
 
