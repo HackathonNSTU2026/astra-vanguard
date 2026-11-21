@@ -248,8 +248,8 @@ class DecisionMaker:
             r'read|show|open|print|dump|copy|reveal'
         )
         patterns = (
-            rf'(?i)(?:{access_verbs})\s+(?:мне\s+|me\s+)?(?:файл\s+|the\s+file\s+)?'
-            rf'[^\n]{{0,50}}{env_file}',
+            (rf'(?i)(?:{access_verbs})\s+(?:мне\s+|me\s+)?(?:файл\s+|the\s+file\s+)?'
+            rf'[^\n]{{0,50}}{env_file}'),
             rf'(?i)\b(?:cat|type|more|less|Get-Content)\s+[^\n]{{0,100}}{env_file}',
         )
         return any(re.search(pattern, text) for pattern in patterns)
