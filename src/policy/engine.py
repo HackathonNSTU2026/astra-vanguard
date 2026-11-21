@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from src.policy.environments import detect_environment
+from src.policy.environments import detect_environment, environment_signals
 from src.policy.models import SecurityPolicy
 
 
@@ -48,6 +48,14 @@ class PolicyEngine:
                 reason=f'Агент {agent_name} не найден в политике',
             )
 
+        if tool not in agent.tools:
+            return ToolCheck(
+                tool=tool,
+                allowed=False,
+                requires_confirm=False,
+                reason=f'Инструмент {tool} отсутствует в списке разрешённых инструментов агента {agent_name}',
+            )
+
         role_policy = agent.roles.get(user_role)
         if role_policy is None:
             return ToolCheck(
@@ -68,9 +76,11 @@ class PolicyEngine:
 
         # Определяем окружение
         env = None
+        has_env_signal = False
         if env_text:
             env = detect_environment(env_text)
-        if env is None and resource:
+            has_env_signal = any(environment_signals(env_text))
+        if env is None and resource and not has_env_signal:
             env = detect_environment(resource)
 
         # Расцениваем правило
@@ -108,10 +118,14 @@ class PolicyEngine:
             requires_confirm = False
             reason_parts.append(f'инструмент {tool} разрешён в любом окружении')
         elif rule == 'nonprod':
-            if env == 'nonprod' or env is None:
+            if env == 'nonprod':
                 allowed = True
                 requires_confirm = False
                 reason_parts.append(f'инструмент {tool} разрешён в nonprod')
+            elif env is None:
+                reason_parts.append(
+                    f'инструмент {tool}: окружение не определено, правило nonprod не подтверждено'
+                )
             else:
                 allowed = False
                 requires_confirm = False
@@ -122,44 +136,53 @@ class PolicyEngine:
             # Условное правило: {prod: confirm, nonprod: allow} или {any: confirm}
             if 'any' in conditions:
                 val = conditions['any']
-                allowed = val != 'deny'
+                allowed = val in ('allow', 'confirm')
                 requires_confirm = val == 'confirm'
                 reason_parts.append(
                     f'инструмент {tool}: {val} в любом окружении для роли {user_role}'
                 )
             elif env == 'prod' and 'prod' in conditions:
                 val = conditions['prod']
-                allowed = val != 'deny'
+                allowed = val in ('allow', 'confirm')
                 requires_confirm = val == 'confirm'
                 reason_parts.append(
                     f'инструмент {tool}: {val} в production для роли {user_role}'
                 )
             elif env == 'nonprod' and 'nonprod' in conditions:
                 val = conditions['nonprod']
-                allowed = val != 'deny'
+                allowed = val in ('allow', 'confirm')
                 requires_confirm = val == 'confirm'
                 reason_parts.append(
                     f'инструмент {tool}: {val} в nonprod для роли {user_role}'
                 )
             elif env is None:
-                # Неоднозначное окружение — консервативно: require confirm если есть confirm в условиях
-                vals = set(conditions.values())
-                if 'deny' in vals:
+                # Missing or contradictory environment: apply the strictest
+                # applicable prod/nonprod rule; absent rules do not grant access.
+                vals = [conditions[k] for k in ('prod', 'nonprod') if k in conditions]
+                if not vals or any(v not in ('allow', 'confirm', 'deny') for v in vals):
                     allowed = False
-                    requires_confirm = False
                     reason_parts.append(
-                        f'инструмент {tool}: окружение不明, консервативно блокировано'
+                        f'инструмент {tool}: нет однозначного правила для окружения'
+                    )
+                elif 'deny' in vals:
+                    reason_parts.append(
+                        f'инструмент {tool}: окружение не определено или противоречиво; заблокировано по наиболее строгому правилу'
                     )
                 elif 'confirm' in vals:
                     allowed = True
                     requires_confirm = True
                     reason_parts.append(
-                        f'инструмент {tool}: окружение不明, требуется подтверждение'
+                        f'инструмент {tool}: окружение не определено или противоречиво; требуется подтверждение'
+                    )
+                elif len(vals) == 2:
+                    allowed = True
+                    reason_parts.append(
+                        f'инструмент {tool}: разрешено в обоих окружениях'
                     )
                 else:
-                    allowed = True
-                    requires_confirm = False
-                    reason_parts.append(f'инструмент {tool}: разрешено (окружение不明)')
+                    reason_parts.append(
+                        f'инструмент {tool}: отсутствует правило для второго окружения'
+                    )
             else:
                 allowed = False
                 requires_confirm = False
@@ -189,40 +212,59 @@ class PolicyEngine:
         # Для чтения логов используем тот же инструмент read_logs
         return self.check_tool(agent_name, user_role, 'read_logs', resource, env_text)
 
-    def is_forbidden_action(self, text: str) -> tuple[bool, str]:
-        """Проверяет, содержит ли текст запрещённое действие для любой роли."""
-        text_lower = text.lower()
-        for action in self.policy.forbidden_actions:
-            action_keywords = {
-                'disable_audit_or_wipe_logs': [
-                    'отключить аудит',
-                    'уничтожить логи',
-                    'удалить логи',
-                    'wipe logs',
-                    'disable audit',
-                ],
-                'pipe_remote_script_to_shell': [
-                    'curl',
-                    '| bash',
-                    '| sh',
-                    'загрузка удалённого скрипта',
-                    'немедленным запуском',
-                ],
-                'add_ssh_keys_or_sudoers_via_chat': [
-                    'ssh-ключ',
-                    'sudoers',
-                    'добавить ssh',
-                    'ssh key',
-                ],
-                'send_secrets_or_data_to_external_hosts': [
-                    'отправить секрет',
-                    'секрет на внешний',
-                    'exfiltration',
-                    'внешний адрес',
-                ],
-            }
-            keywords = action_keywords.get(action, [action])
-            if any(kw in text_lower for kw in keywords):
+    def is_forbidden_action(
+        self, text: str, agent_name: str | None = None
+    ) -> tuple[bool, str]:
+        """Проверяет запрещённые политикой действия независимо от роли."""
+        import re
+
+        agent = self.policy.agent(agent_name) if agent_name else None
+        agent_actions = (
+            agent.forbidden_actions
+            if agent is not None
+            else [
+                action
+                for configured_agent in self.policy.agents.values()
+                for action in configured_agent.forbidden_actions
+            ]
+        )
+        actions = list(
+            dict.fromkeys(
+                [
+                    *self.policy.forbidden_actions,
+                    *agent_actions,
+                ]
+            )
+        )
+        action_patterns = {
+            'disable_audit_or_wipe_logs': (
+                r'\b(?:disable|turn\s+off)\s+(?:audit(?:ing)?|logging)\b',
+                r'\b(?:wipe|destroy|delete|erase|remove)\s+(?:security\s+)?logs?\b',
+                r'\b(?:отключ(?:и|ить|ите)|выключ(?:и|ить|ите))\s+(?:аудит|логир\w*)',
+                r'\b(?:уничтож(?:ь|ить|ьте)|удал(?:и|ить|ите)|стер(?:еть|и))\s+(?:журнал\w*|лог\w*)',
+            ),
+            'pipe_remote_script_to_shell': (
+                r'\b(?:curl|wget)\b[^\r\n|]{0,512}\|\s*(?:bash|sh)\b',
+                r'\b(?:download|fetch)\b[^\r\n]{0,160}\b(?:script|installer)\b[^\r\n]{0,160}\b(?:run|execute)\b',
+                r'\bзагруз(?:и|ить|ка)\s+удалённ\w*\s+скрипт\w*[^.\r\n]{0,160}(?:запуст|выполн)',
+            ),
+            'add_ssh_keys_or_sudoers_via_chat': (
+                r'\b(?:add|append|install|import)\b[^\r\n]{0,160}\b(?:ssh[-_ ]?key|authorized_keys?)\b',
+                r'\b(?:modify|edit|change)\b[^\r\n]{0,160}\bsudoers\b',
+                r'\b(?:добав(?:ь|ить|ьте)|установ(?:и|ить|ите)|запиш(?:и|ать|ите))\b[^\r\n]{0,160}\b(?:ssh[-_ ]?(?:ключ|key)|authorized_keys?)\b',
+                r'\b(?:измени|изменить|редактируй|редактировать|добавь|добавить)\b[^\r\n]{0,160}\bsudoers\b',
+            ),
+            'send_secrets_or_data_to_external_hosts': (
+                r'\b(?:send|upload|post|exfiltrat\w*)\b[^\r\n]{0,200}\b(?:secrets?|tokens?|logs?|data)\b[^\r\n]{0,200}\b(?:external|outside|third[- ]?party)\b',
+                r'\b(?:secrets?|tokens?|logs?|data)\b[^\r\n]{0,200}\b(?:send|upload|post|exfiltrat\w*)\b[^\r\n]{0,200}\b(?:external|outside|third[- ]?party)\b',
+                r'\b(?:отправ(?:ь|ить|ьте)|переда(?:й|ть|йте)|выгруз(?:и|ить|ите)|загруз(?:и|ить|ите))\b[^\r\n]{0,200}\b(?:секрет\w*|токен\w*|лог\w*|данн\w*)\b[^\r\n]{0,200}\b(?:внешн\w*|треть(?:ей|я)\s+сторон\w*)',
+                r'\b(?:секрет\w*|токен\w*|лог\w*|данн\w*)\b[^\r\n]{0,200}\b(?:отправ(?:ь|ить|ьте)|переда(?:й|ть|йте)|выгруз(?:и|ить|ите)|загруз(?:и|ить|ите))\b[^\r\n]{0,200}\b(?:внешн\w*|треть(?:ей|я)\s+сторон\w*)',
+            ),
+        }
+
+        for action in actions:
+            patterns = action_patterns.get(action, ())
+            if any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns):
                 return True, action
         return False, ''
 

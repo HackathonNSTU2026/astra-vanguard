@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -41,6 +42,14 @@ class RuleBasedDetector:
         r'(?i)you\s+are\s+now\s+a\s+(developer|admin|root|superuser)',
         r'(?i)bypass\s+(all\s+)?(safety|security|restriction|filter)',
         r'(?i)without\s+(any\s+)?(restriction|limitation|confirmation)',
+        r'(?i)игнорируй\s+(все\s+)?(предыдущие|системные|прошлые)\s+инструкц',
+        r'(?i)забудь\s+(все\s+)?(предыдущие\s+)?инструкц',
+        r'(?i)игнорируй\s+системн\w*\s+(промпт|инструкц)',
+        r'(?i)обойди\s+(защит|ограничен|политик)',
+        r'(?i)притворись\s+(что\s+)?(ты|вы)\s+(администратор|админ|root)',
+        r'(?i)теперь\s+(ты|вы)\s+(администратор|админ|root|без\s+ограничений)',
+        r'(?iu)\bпритвор(?:ись|яйся)\s*,?\s*(?:что\s+)?(?:ты|вы)\s+(?:root(?:[-\s]+(?:пользователь|user))?|админ(?:истратор)?)\b',
+        r'(?i)\byou\s+are\s+now\s+(?:an?\s+)?(?:unfiltered|unrestricted|unlimited|amoral)(?:\s+(?:admin(?:istrator)?|root))?(?:\s+with\s+(?:root|admin)\s+access)?\b',
     ]
 
     PROMPT_INJECTION_PATTERNS = [
@@ -52,6 +61,12 @@ class RuleBasedDetector:
         r'(?i)admin\s+override',
         r'(?i)emergency\s+access',
         r'(?i)sudo\s+mode',
+        r'(?i)ignore\s+(?:everything|anything)\b[^\r\n]{0,100}\b(?:system\s+(?:message|prompt|instructions?)|safety\s+checks?)\b',
+        r'(?i)###\s*new\s+policy\s*###|\b(?:new|updated?)\s+(?:policy|rules?)\b[^\r\n]{0,100}\b(?:every\s+user\s+is\s+(?:an?\s+)?admin|run\s+without\s+confirmation)\b',
+        r'(?i)\b(?:decode|decrypt)\b[^\r\n]{0,100}\bbase64\b[^\r\n]{0,100}\b(?:follow|execute|run)\b',
+        r'(?iu)\bдекодируй\b[^\r\n]{0,100}\bbase64\b[^\r\n]{0,100}\b(?:выполн|следуй)\w*',
+        r'(?i)\bread\b[^\r\n]{0,100}\bbackwards?\b[^\r\n]{0,100}\b(?:do|follow|execute|run)\b',
+        r'(?iu)\bзадом\s+напер[её]д\b[^\r\n]{0,100}\b(?:выполн|сделай|следуй)\w*',
     ]
 
     INDIRECT_INJECTION_PATTERNS = [
@@ -67,6 +82,9 @@ class RuleBasedDetector:
         r'(?i)run\s+the\s+following',
         r'(?i)AI\s+agent:.*run|AI\s+agent:.*execute|AI\s+agent:.*iptables',
         r'(?i)document\s+contains\s+hidden',
+        r'(?i)\bai[- ]?(?:agent|assistant)\s+instructions?\s*:',
+        r'(?iu)\bинструкц\w*\s+для\s+ии[- ]?ассистент\w*\s*:',
+        r'(?iu)\bассистент\s*,?\s+(?:чтобы\s+)?[^\r\n]{0,100}\b(?:удал\w*|отправ\w*|выгруз\w*|выполн\w*)\b[^\r\n]{0,160}\b(?:без\s+подтвержден\w*|секрет\w*|token\w*|kubeconfig)\b',
     ]
 
     SYSTEM_PROMPT_EXTRACTION = [
@@ -79,6 +97,10 @@ class RuleBasedDetector:
         r'(?i)your\s+system\s+prompt',
         r'(?i)leak\s+(your|the)\s+(system\s+)?prompt',
         r'(?i)print\s+your\s+instructions',
+        r'(?i)(покажи|раскрой|выведи|процитируй)\s+(свой|твой|ваш)?\s*системн\w*\s+(промпт|инструкц)',
+        r'(?i)какие\s+(у\s+тебя|у\s+вас)\s+системн\w*\s+инструкц',
+        r'(?iu)\b(?:покажи|раскрой|выведи|процитируй|перечисли)\s+(?:(?:сво|тво|ваш)\w*\s+)?системн\w*\s+(?:промпт|инструкц\w*)\b',
+        r'(?i)\bwhat\s+(?:are|were)\s+(?:your|the)\s+(?:\w+\s+){0,3}(?:instructions|guidelines|rules)\b',
     ]
 
     SYSTEM_PROMPT_OVERRIDE = [
@@ -110,6 +132,9 @@ class RuleBasedDetector:
         r'(?i)send\s+(data|secrets|logs)\s+to',
         r'(?i)upload\s+to\s+(external|outside)',
         r'(?i)post\s+to\s+(external|outside)',
+        r'(?i)\b(?:send|upload|post|export)\b[^\r\n]{0,200}\b(?:secrets?|tokens?|logs?|data)\b[^\r\n]{0,200}\b(?:external|outside|third[- ]?party)\b',
+        r'(?iu)\b(?:отправ\w*|переда\w*|перешл\w*|выгруз\w*|экспортир\w*)\b[^\r\n]{0,200}\b(?:секрет\w*|парол\w*|токен\w*|ключ\w*|лог\w*|данн\w*)\b[^\r\n]{0,200}\b(?:внешн\w*|треть\w*\s+сторон\w*|наруж\w*)',
+        r'(?iu)\b(?:секрет\w*|парол\w*|токен\w*|ключ\w*|лог\w*|данн\w*)\b[^\r\n]{0,200}\b(?:отправ\w*|переда\w*|перешл\w*|выгруз\w*|экспортир\w*)\b[^\r\n]{0,200}\b(?:внешн\w*|треть\w*\s+сторон\w*|наруж\w*)',
     ]
 
     HARMFUL_CONTENT = [
@@ -120,6 +145,17 @@ class RuleBasedDetector:
         r'(?i)disable\s+(alarm|camera|security)\s+in\s+(someone|another|other|foreign)',
         r'(?i)how\s+to\s+(make|build|create)\s+(bomb|explosive|weapon)',
         r'(?i)instructions\s+for\s+(harming|hurting|killing)',
+        r'(?i)\b(?:write|create|craft|develop|give)\b[^\r\n]{0,80}\b(?:rce|remote\s+code\s+execution)\s+exploit\b',
+    ]
+
+    UNAUTHORIZED_DATA_ACCESS = [
+        r'(?i)\b(?:show|print|dump|reveal|read)\b[^\r\n]{0,120}\b(?:aws\s+access\s+keys?|passwords?|tokens?|secrets?|vault)\b',
+        r'(?iu)\b(?:покажи|выведи|прочитай|раскрой|дамп)\b[^\r\n]{0,120}\b(?:парол\w*|токен\w*|секрет\w*|vault)\b',
+        r'(?iu)\b(?:покажи|выведи|раскрой)[\w\s/-]{0,160}(?:vault|secret)[\w\s/-]{0,160}(?:prod|production)',
+    ]
+
+    SENSITIVE_ACTION_PATTERNS = [
+        r'(?iu)\b(?:выполни|запусти)\s+(?:миграц\w*|migration)\b',
     ]
 
     TOOL_ABUSE_PATTERNS = [
@@ -128,9 +164,9 @@ class RuleBasedDetector:
         r'(?i)chmod\s+-R\s+777',
         r'(?i)rm\s+-rf\s+/',
         r'(?i)format\s+(the\s+)?(drive|disk)',
-        r'(?i)drop\s+(the\s+)?(database|table)',
         r'(?i)delete\s+all\s+(data|files|resources)',
         r'(?i)wipe\s+(the\s+)?(server|disk|drive)',
+        r'(?i)drop\s+(the\s+)?(?:[\w.-]+\s+){0,3}(database|db|table|schema)',
     ]
 
     def __init__(self) -> None:
@@ -145,6 +181,8 @@ class RuleBasedDetector:
             'system_prompt_extraction': self.SYSTEM_PROMPT_EXTRACTION,
             'system_prompt_override': self.SYSTEM_PROMPT_OVERRIDE,
             'privilege_escalation': self.PRIVILEGE_ESCALATION,
+            'unauthorized_data_access': self.UNAUTHORIZED_DATA_ACCESS,
+            'sensitive_action': self.SENSITIVE_ACTION_PATTERNS,
             'data_exfiltration': self.DATA_EXFILTRATION,
             'harmful_content': self.HARMFUL_CONTENT,
             'tool_abuse': self.TOOL_ABUSE_PATTERNS,
@@ -263,6 +301,22 @@ class Classifier:
             re.compile(r'\bdelete_resource\b', re.IGNORECASE),
         ]
 
+    @staticmethod
+    def _normalize_for_detection(text: str) -> str:
+        """Remove invisible and simple character-spacing obfuscation for rules."""
+        normalized = unicodedata.normalize('NFKC', text)
+        normalized = re.sub(r'[\u200b-\u200d\ufeff]', '', normalized)
+
+        def collapse(match: re.Match[str]) -> str:
+            return re.sub(r'[ \t]+', '', match.group(0))
+
+        collapsed = re.sub(
+            r'(?u)(?<!\w)(?:[A-Za-zА-Яа-яЁё0-9][ \t]+){2,}[A-Za-zА-Яа-яЁё0-9](?!\w)',
+            collapse,
+            normalized,
+        )
+        return normalized if collapsed == normalized else normalized + '\n' + collapsed
+
     def load_model(self, model_dir: str | Path) -> None:
         model_path = Path(model_dir) / 'classifier.joblib'
         if model_path.exists():
@@ -301,7 +355,9 @@ class Classifier:
             parts.append(att.get('content', ''))
         full_text = '\n'.join(parts)
 
-        rule_findings = self.rule_detector.detect(full_text)
+        rule_findings = self.rule_detector.detect(
+            self._normalize_for_detection(full_text)
+        )
         if rule_findings:
             severity = {
                 'data_exfiltration': 5,
