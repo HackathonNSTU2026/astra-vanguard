@@ -3,7 +3,6 @@ services:
     build:
       context: ..
       dockerfile: deploy/backend.Dockerfile
-    container_name: astra-vanguard
     ports:
       - "8000:8000"
     volumes:

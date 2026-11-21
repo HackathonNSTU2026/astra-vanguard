@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -12,14 +14,18 @@ from src.guard import Guard
 from src.session import SessionManager
 
 settings = load_settings()
-guard = Guard(settings, model_dir='models/classifier')
+model_dir = Path(os.environ.get('MODEL_DIR', 'models/classifier'))
+bundled_dir = os.environ.get('BUNDLED_MODEL_DIR')
+if bundled_dir and not (model_dir / 'classifier.joblib').is_file():
+    model_dir = Path(bundled_dir)
+guard = Guard(settings, model_dir=model_dir)
+if bundled_dir and guard.classifier.model is None:
+    raise RuntimeError(f'Не удалось загрузить классификатор из {model_dir}')
 _policy_path = settings.policy_path
 _adapter = DemoAdapter(settings.adapter_path)
 _sessions = SessionManager(settings.sessions_path)
 
-app = FastAPI(
-    title='ИИ-сторож API', version='1.0.0', docs_url=None, redoc_url=None
-)
+app = FastAPI(title='ИИ-сторож API', version='1.0.0', docs_url=None, redoc_url=None)
 
 MAX_BODY_SIZE = 1048576  # 1 MiB
 
@@ -36,7 +42,11 @@ def _parse_json_body(body: bytes) -> dict[str, Any]:
 
 @app.get('/health')
 def health():
-    return {'status': 'ok', 'policy_version': guard.policy.version}
+    return {
+        'status': 'ok',
+        'policy_version': guard.policy.version,
+        'model_loaded': guard.classifier.model is not None,
+    }
 
 
 @app.get('/admin/policy')
@@ -116,7 +126,13 @@ def adapter_confirm(payload: dict[str, Any]):
     user_id = payload.get('user_id')
     if not pending_id or not user_id:
         raise HTTPException(status_code=400, detail='missing_fields')
-    ok = _adapter.confirm(pending_id, user_id)
+    ok = _adapter.confirm(
+        pending_id,
+        user_id,
+        lambda prompt, context: (
+            guard.check(prompt, context).decision in {'allow', 'confirm'}
+        ),
+    )
     if not ok:
         raise HTTPException(status_code=400, detail='confirm_failed')
     return {'ok': True}

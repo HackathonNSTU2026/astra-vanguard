@@ -12,22 +12,33 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from src.classifier import Classifier
+from src.classifier import Classifier, classification_text
 
 
-def load_dev(path: str | Path) -> tuple[list[str], list[str], list[str]]:
+def load_training_data(*paths: Path) -> tuple[list[str], list[str], list[str]]:
     texts: list[str] = []
     categories: list[str] = []
     levels: list[str] = []
-    with open(path, 'r', encoding='utf-8') as f:
-        for line in f:
+    for path in paths:
+        for line in path.read_text(encoding='utf-8').splitlines():
             line = line.strip()
             if not line:
                 continue
             rec = json.loads(line)
-            texts.append(rec['user_prompt'])
-            categories.append(rec['risk_category'])
-            levels.append(rec['risk_level'])
+            context = rec.get('context', {})
+            prompts = [rec['user_prompt']]
+            if rec.get('label_applies_to_context_only'):
+                prompts.append('')
+            for prompt in prompts:
+                texts.append(
+                    classification_text(
+                        prompt,
+                        context.get('history', []),
+                        context.get('attachments', []),
+                    )
+                )
+                categories.append(rec['risk_category'])
+                levels.append(rec['risk_level'])
     return texts, categories, levels
 
 
@@ -35,7 +46,9 @@ def main() -> None:
     dev_path = Path('dataset/dev.jsonl')
     model_dir = Path('models/classifier')
 
-    texts, categories, levels = load_dev(dev_path)
+    texts, categories, levels = load_training_data(
+        dev_path, dev_path.with_name('generalization_train.jsonl')
+    )
 
     clf = Classifier()
     clf.train(texts, categories, levels)

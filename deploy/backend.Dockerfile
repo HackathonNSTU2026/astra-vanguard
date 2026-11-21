@@ -1,4 +1,4 @@
-FROM ghcr.io/astral-sh/uv:python3.14-alpine
+FROM ghcr.io/astral-sh/uv:python3.14-alpine AS runtime
 
 WORKDIR /app
 
@@ -17,6 +17,15 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY backend/src ./src
 COPY backend/dataset/security_policy.yaml ./dataset/security_policy.yaml
+
+FROM runtime AS training
+COPY backend/scripts/train.py ./scripts/train.py
+COPY backend/dataset/dev.jsonl backend/dataset/generalization_train.jsonl ./dataset/
+RUN OPENBLAS_NUM_THREADS=1 python scripts/train.py
+
+FROM runtime
+ENV BUNDLED_MODEL_DIR=/opt/astra/classifier
+COPY --from=training /app/models/classifier /opt/astra/classifier
 
 EXPOSE 8000
 

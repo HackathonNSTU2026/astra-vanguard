@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import threading
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import UTC
 from pathlib import Path
@@ -87,7 +88,12 @@ class DemoAdapter:
             self._save()
         return pending_id
 
-    def confirm(self, pending_id: str, user_id: str) -> bool:
+    def confirm(
+        self,
+        pending_id: str,
+        user_id: str,
+        recheck: Callable[[str, dict[str, Any]], bool],
+    ) -> bool:
         with self._lock:
             pending = self._pending.get(pending_id)
             if pending is None:
@@ -95,6 +101,8 @@ class DemoAdapter:
             if pending.user_id != user_id:
                 return False
             if pending.confirmed:
+                return False
+            if not recheck(pending.user_prompt, pending.context):
                 return False
             pending.confirmed = True
             self._received.append(

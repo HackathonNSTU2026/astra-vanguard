@@ -10,6 +10,10 @@
 backend/src/**/__pycache__
 !backend/dataset/
 !backend/dataset/security_policy.yaml
+!backend/dataset/dev.jsonl
+!backend/dataset/generalization_train.jsonl
+!backend/scripts/
+!backend/scripts/train.py
 !frontend/
 !frontend/package.json
 !frontend/bun.lock

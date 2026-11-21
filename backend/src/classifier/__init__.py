@@ -2,15 +2,42 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.pipeline import Pipeline
+from sklearn.pipeline import FeatureUnion, Pipeline
 
 from src.config.settings import Settings
+
+_REQUEST_OPENING = re.compile(
+    r'^(?:(?:hello|hey|hi|quick question|добрый день|привет|здравствуйте|слушай|вопрос)'
+    r'[!,:.]+\s*)+',
+    re.IGNORECASE,
+)
+_REQUEST_CLOSING = re.compile(
+    r'(?<!\s)(?:\s+(?:thank you|thanks|please|заранее спасибо|спасибо|пожалуйста)[!.]*){1,3}$',
+    re.IGNORECASE,
+)
+
+
+def classification_text(
+    user_prompt: str,
+    history: list[dict[str, str]],
+    attachments: list[dict[str, str]],
+) -> str:
+    # Keep stock greetings out of TF-IDF features at training and inference.
+    prompt = _REQUEST_OPENING.sub('', user_prompt.strip())
+    parts = [f'current request: {_REQUEST_CLOSING.sub("", prompt)}']
+    parts.extend(
+        f'history {entry.get("role", "")}: {entry.get("content", "")}'
+        for entry in history
+    )
+    parts.extend(f'attachment: {entry.get("content", "")}' for entry in attachments)
+    return '\n'.join(parts)
 
 
 @dataclass(frozen=True)
@@ -88,13 +115,17 @@ class RuleBasedDetector:
     ]
 
     SYSTEM_PROMPT_EXTRACTION = [
-        r'(?i)system\s+prompt',
+        (
+            r'(?i)\b(?:reveal|show|print|quote|repeat|copy|disclose|return|output|display|give|send|leak|dump)\s+'
+            r'(?:(?:me|us|the|your|full|exact|original|hidden|internal|entire|current|verbatim|text|of)\s+){0,7}'
+            r'system\s+prompt\b'
+        ),
         r'(?i)what\s+(are|were)\s+(your|the)\s+instructions',
         r'(?i)quote\s+(your|the)\s+(system\s+)?instructions',
         r'(?i)reveal\s+(your|the)\s+(system\s+)?prompt',
         r'(?i)show\s+me\s+(your|the)\s+instructions',
         r'(?i)what\s+are\s+your\s+guidelines',
-        r'(?i)your\s+system\s+prompt',
+        r'(?i)\bwhat\s+(?:is|was)\s+your\s+system\s+prompt\b',
         r'(?i)leak\s+(your|the)\s+(system\s+)?prompt',
         r'(?i)print\s+your\s+instructions',
         r'(?i)(покажи|раскрой|выведи|процитируй)\s+(свой|твой|ваш)?\s*системн\w*\s+(промпт|инструкц)',
@@ -208,6 +239,8 @@ class TrainableClassifier:
     levels: list[str] = field(default_factory=list)
     is_trained: bool = False
     confidence_threshold: float = 0.3
+    danger_model: LogisticRegression | None = None
+    danger_threshold: float = 0.45
 
     def fit(self, texts: list[str], categories: list[str], levels: list[str]) -> None:
         from sklearn.preprocessing import LabelEncoder
@@ -216,14 +249,20 @@ class TrainableClassifier:
             [
                 (
                     'tfidf',
-                    TfidfVectorizer(
-                        ngram_range=(1, 3),
-                        analyzer='char_wb',
-                        min_df=1,
-                        max_features=5000,
+                    FeatureUnion(
+                        [
+                            (
+                                'chars',
+                                TfidfVectorizer(analyzer='char_wb', ngram_range=(2, 5)),
+                            ),
+                            ('words', TfidfVectorizer(ngram_range=(1, 2))),
+                        ]
                     ),
                 ),
-                ('clf', LogisticRegression(max_iter=2000, class_weight='balanced')),
+                (
+                    'clf',
+                    LogisticRegression(C=5, max_iter=2000, class_weight='balanced'),
+                ),
             ]
         )
         le_cat = LabelEncoder()
@@ -231,6 +270,14 @@ class TrainableClassifier:
         self.categories = list(le_cat.classes_)
 
         self.pipeline.fit(texts, le_cat.transform(categories))
+        features = self.pipeline.named_steps['tfidf'].transform(texts)
+        dangerous = [cat not in {'none', 'sensitive_action'} for cat in categories]
+        self.danger_model = None
+        if len(set(dangerous)) == 2:
+            self.danger_model = LogisticRegression(
+                C=5, max_iter=2000, class_weight='balanced'
+            )
+            self.danger_model.fit(features, dangerous)
         self.is_trained = True
 
     def predict(self, text: str) -> ClassificationResult:
@@ -244,12 +291,28 @@ class TrainableClassifier:
 
         import numpy as np
 
-        proba = self.pipeline.predict_proba([text])[0]
-        idx = int(np.argmax(proba))
+        if self.danger_model is not None:
+            features = self.pipeline.named_steps['tfidf'].transform([text])
+            danger_score = float(self.danger_model.predict_proba(features)[0, 1])
+            is_dangerous = danger_score >= self.danger_threshold
+            proba = self.pipeline.named_steps['clf'].predict_proba(features)[0]
+            candidates = [
+                i
+                for i, category in enumerate(self.categories)
+                if (category not in {'none', 'sensitive_action'}) == is_dangerous
+            ]
+            idx = max(candidates, key=lambda i: proba[i])
+        else:
+            proba = self.pipeline.predict_proba([text])[0]
+            idx = int(np.argmax(proba))
         cat = self.categories[idx]
         conf = float(proba[idx])
 
-        if conf < self.confidence_threshold and cat != 'none':
+        if (
+            self.danger_model is None
+            and conf < self.confidence_threshold
+            and cat != 'none'
+        ):
             return ClassificationResult(
                 risk_category='none',
                 risk_level='none',
@@ -347,6 +410,8 @@ class Classifier:
         user_prompt: str,
         history: list[dict[str, str]],
         attachments: list[dict[str, str]],
+        *,
+        always_block: Collection[str] = (),
     ) -> ClassificationResult:
         parts: list[str] = [user_prompt]
         for entry in history:
@@ -373,7 +438,10 @@ class Classifier:
                 'fraud_social_engineering': 2,
                 'abuse': 2,
             }
-            best_cat = max(rule_findings, key=lambda x: severity.get(x[0], 1))[0]
+            best_cat = max(
+                (category for category, _ in rule_findings),
+                key=lambda category: (category in always_block, severity.get(category, 1)),
+            )
             level_map = {
                 'data_exfiltration': 'critical',
                 'harmful_content': 'critical',
@@ -398,7 +466,10 @@ class Classifier:
             )
 
         if self.model is not None and self.model.is_trained:
-            result = self.model.predict(full_text)
+            model_text = full_text
+            if self.model.danger_model is not None:
+                model_text = classification_text(user_prompt, history, attachments)
+            result = self.model.predict(model_text)
             result = ClassificationResult(
                 risk_category=result.risk_category,
                 risk_level=result.risk_level,

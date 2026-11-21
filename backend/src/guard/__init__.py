@@ -46,7 +46,7 @@ class Guard:
             self.classifier.load_model(model_dir)
             if self.classifier.model is not None:
                 self.classifier.model.confidence_threshold = 0.15
-        self.decision_maker = DecisionMaker(self.policy)
+        self.decision_maker = DecisionMaker(self.policy, self.classifier)
         self.explainer = Explainer()
         self.journal = Journal(
             self.settings.journal_path, policy_version=self.policy.version
@@ -65,7 +65,10 @@ class Guard:
         attachments = context.get('attachments', [])
         target_agent = context.get('target_agent', 'it_ops_agent')
 
-        classification = self.classifier.classify(user_prompt, history, attachments)
+        maker = self.decision_maker
+        classification = self.classifier.classify(
+            user_prompt, history, attachments, always_block=maker.policy.always_block
+        )
 
         from src.policy.environments import detect_environment
 
@@ -73,13 +76,12 @@ class Guard:
         # Old messages and attachments are untrusted data, not environment claims.
         env = detect_environment(user_prompt)
 
-        decision = self.decision_maker.make(
+        decision = maker.make(
             classification=classification,
             user_role=user_role,
             user_prompt=user_prompt,
             history=history,
             attachments=attachments,
-            env_text=user_prompt,
             target_agent=target_agent,
         )
 
@@ -108,5 +110,5 @@ class Guard:
 
     def reload_policy(self) -> None:
         self.policy = load_policy(self.settings.policy_path)
-        self.decision_maker = DecisionMaker(self.policy)
+        self.decision_maker = DecisionMaker(self.policy, self.classifier)
         self.journal.policy_version = self.policy.version
