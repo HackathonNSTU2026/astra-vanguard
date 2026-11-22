@@ -401,18 +401,45 @@ th { background: var(--subtle); }
   .organizer-logo img { width: 92px; }
   .chat-content, .admin-content { margin-block: 12px; }
   .workspace { display: flex; flex-direction: column; height: auto; min-height: calc(100dvh - 95px); }
-  .sidebar {
-    padding: 9px 12px;
+  body:has(.chat-drawer[open]) { overflow: hidden; }
+  .chat-drawer {
+    inset: 0 auto 0 0;
+    width: min(320px, 100% - 48px);
+    max-width: none;
+    height: 100%;
+    max-height: none;
+    margin: 0;
+    padding: 0;
     border: 0;
-    border-bottom: 1px solid var(--border);
-    border-radius: 16px 16px 0 0;
+    background: var(--subtle);
+    color: var(--text);
+    box-shadow: var(--shadow);
+    overscroll-behavior: contain;
   }
-  .sidebar-header { margin-bottom: 4px; }
-  .chat-list { display: flex; overflow-x: auto; }
-  .chat-list li { flex: 0 0 auto; max-width: 185px; }
-  .adapter-panel { margin-top: 6px; padding-top: 6px; }
+  .chat-drawer::backdrop { background: #10142380; }
+  .chat-drawer .sidebar { height: 100%; padding: 12px; border-radius: 0; }
+  .chat-drawer .sidebar-header h2 { margin-right: auto; }
+  .chat-drawer .chat-list { overflow: hidden auto; overscroll-behavior: contain; }
+  .drawer-button {
+    display: grid;
+    place-items: center;
+    flex: 0 0 44px;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    font-size: 1.45rem;
+    line-height: 1;
+  }
+  .hamburger-icon {
+    width: 18px;
+    height: 2px;
+    border-radius: 1px;
+    background: currentColor;
+    box-shadow: 0 -6px currentColor, 0 6px currentColor;
+  }
   .conversation { flex: 1; }
-  .conversation-header { padding: 10px 12px; }
+  .conversation-header { justify-content: flex-start; padding: 10px 12px; }
+  .conversation-header > div { min-width: 0; }
   .transcript { flex-basis: 280px; }
   .messages { padding: 12px; }
   .message { max-width: 96%; }
@@ -420,6 +447,14 @@ th { background: var(--subtle); }
   .composer-footer { flex-wrap: wrap; }
   .request-settings[open] { flex-basis: 100%; }
   .composer-footer > button { margin-left: auto; }
+}
+
+@media (max-width: 710px) and (prefers-reduced-motion: no-preference) {
+  .chat-drawer[open] { animation: chat-drawer-enter .2s ease-out; }
+}
+
+@keyframes chat-drawer-enter {
+  from { transform: translateX(-100%); }
 }
 
 @media (max-width: 510px) {

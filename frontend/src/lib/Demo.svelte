@@ -45,6 +45,7 @@
 
   const storageKey = 'astra-vanguard.chats.v1'
   const example = 'Покажи текущее состояние сервиса payments-api.'
+  const mobileLayout = window.matchMedia('(max-width: 710px)')
   const decisions: Record<Decision, string> = {
     allow: 'Разрешено',
     confirm: 'Требуется подтверждение',
@@ -93,6 +94,9 @@
   let received = $state<ReceivedRequest[]>([])
   let adapterError = $state('')
   let adapterVersion = 0
+  let isMobile = $state(mobileLayout.matches)
+  let chatDrawer = $state<HTMLDialogElement>()
+  let adapterOpen = $state(false)
   let chatDialog = $state<HTMLDialogElement>()
   let renamingChat = $state<Chat>()
   let newName = $state('')
@@ -135,6 +139,7 @@
 
   function selectChat(chat: Chat) {
     workspace.activeId = chat.id
+    chatDrawer?.close()
     void scrollToLatest(chat.id)
   }
 
@@ -309,14 +314,26 @@
   }
 
   onMount(() => {
+    function updateLayout() {
+      if (!mobileLayout.matches) chatDrawer?.close()
+      isMobile = mobileLayout.matches
+    }
+
+    mobileLayout.addEventListener('change', updateLayout)
+    updateLayout()
     void loadAdapter()
     if (active) void scrollToLatest(active.id)
+    return () => mobileLayout.removeEventListener('change', updateLayout)
   })
 </script>
 
 <div class="workspace">
-  <aside class="sidebar" aria-labelledby="chat-list-title">
+  {#snippet sidebarContent()}
     <div class="sidebar-header">
+      {#if isMobile}
+        <button class="secondary drawer-button" type="button" aria-label="Закрыть список чатов"
+          onclick={() => chatDrawer?.close()}><span aria-hidden="true">×</span></button>
+      {/if}
       <h2 id="chat-list-title">Чаты</h2>
       <button bind:this={newChatButton} class="new-chat" type="button" onclick={createChat}><span aria-hidden="true">+</span> Новый чат</button>
     </div>
@@ -354,7 +371,7 @@
     {/if}
     {#if deleteError}<p class="error composer-status" role="alert">{deleteError}</p>{/if}
 
-    <details class="adapter-panel">
+    <details class="adapter-panel" bind:open={adapterOpen}>
       <summary>Запросы адаптера</summary>
       {#if adapterError}
         <p class="error" role="alert">{adapterError}</p>
@@ -368,19 +385,41 @@
         <p>Запросов пока нет.</p>
       {/if}
     </details>
-  </aside>
+  {/snippet}
+
+  {#if isMobile}
+    <dialog id="chat-drawer" class="chat-drawer" bind:this={chatDrawer} aria-labelledby="chat-list-title"
+      onclick={(event) => { if (event.target === event.currentTarget) chatDrawer?.close() }}>
+      <div class="sidebar">
+        {@render sidebarContent()}
+      </div>
+    </dialog>
+  {:else}
+    <aside class="sidebar" aria-labelledby="chat-list-title">
+      {@render sidebarContent()}
+    </aside>
+  {/if}
 
   <section class="conversation" aria-labelledby="conversation-title">
+    {#if active || isMobile}
+      <header class="conversation-header">
+        {#if isMobile}
+          <button class="secondary drawer-button" type="button" aria-label="Открыть список чатов"
+            aria-haspopup="dialog" aria-controls="chat-drawer" onclick={() => chatDrawer?.showModal()}>
+            <span class="hamburger-icon" aria-hidden="true"></span>
+          </button>
+        {/if}
+        {#if active}
+          <div>
+            <h1 id="conversation-title">{title(active)}</h1>
+            <p>Проверка запросов к DevOps-агенту</p>
+          </div>
+        {/if}
+      </header>
+    {/if}
     {#if active}
       {@const chat = active}
       {@const isBusy = busy.has(chat.id)}
-      <header class="conversation-header">
-        <div>
-          <h1 id="conversation-title">{title(chat)}</h1>
-          <p>Проверка запросов к DevOps-агенту</p>
-        </div>
-      </header>
-
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (Keyboard users need to scroll the transcript.) -->
       <div class="transcript" bind:this={transcript} role="log" aria-label="История чата" tabindex="0">
         <div class="messages">
