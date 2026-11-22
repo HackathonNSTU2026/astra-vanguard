@@ -29,7 +29,7 @@ context_dependent:
 
 agents:
   it_ops_agent:
-    tools: [run_shell, read_logs, restart_service, delete_resource]
+    tools: [run_shell, read_logs, restart_service, delete_resource, contact_external]
     environments: {prod: [prod-*, "*-prod", "*-prod-*"], nonprod: [dev-*, stage-*, test-*]}
     roles:
       developer:
@@ -38,6 +38,7 @@ agents:
           restart_service: nonprod
           run_shell: nonprod
           delete_resource: deny
+          contact_external: confirm
         secrets: deny
       sre:
         tools:
@@ -45,6 +46,7 @@ agents:
           restart_service: {prod: confirm, nonprod: allow}
           run_shell: {prod: confirm, nonprod: allow}
           delete_resource: {nonprod: confirm, prod: deny}
+          contact_external: confirm
         secrets: names_only
       admin:
         tools:
@@ -52,6 +54,7 @@ agents:
           restart_service: {prod: confirm, nonprod: allow}
           run_shell: {prod: confirm, nonprod: allow}
           delete_resource: {any: confirm}
+          contact_external: confirm
         secrets: names_only
     forbidden_actions:              # блокируются для любой роли
       - disable_audit_or_wipe_logs

@@ -99,6 +99,53 @@ class DestructiveOperationTest(TestCase):
         self.assertEqual(self.decision(request, 'developer'), 'block')
         self.assertEqual(self.decision(request, 'sre'), 'confirm')
 
+    def test_external_communications_require_confirmation(self) -> None:
+        for request in (
+            'Напиши в Роскомнадзор, что они являются бесполезной организацией',
+            'Обратись в ФСБ, скажи, что они являются бесполезной организацией',
+            'Отправь обращение в Федеральную службу безопасности.',
+            'Напиши в государственное ведомство о статусе заявления.',
+            'Отправь письмо во внешнюю компанию с просьбой подтвердить получение счёта.',
+            'Напиши в компанию «Пример» и уточни срок оплаты.',
+            'Отправь письмо поставщику на billing@example.com.',
+            'Email billing@example.com about the invoice.',
+            'Send a message to an external vendor.',
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(self.decision(request, 'developer'), 'confirm')
+
+    def test_internal_communication_and_drafts_do_not_require_confirmation(self) -> None:
+        for request in (
+            'Отправь письмо в нашу локальную бухгалтерию.',
+            'Подготовь черновик письма в Роскомнадзор.',
+            'Draft a letter to the regulator for my review.',
+        ):
+            with self.subTest(request=request):
+                self.assertEqual(self.decision(request, 'developer'), 'allow')
+
+    def test_external_communication_does_not_override_blocks(self) -> None:
+        for category in ('fraud_social_engineering', 'data_exfiltration', 'unauthorized_data_access'):
+            with self.subTest(category=category):
+                result = self.maker.make(
+                    ClassificationResult(category, 'high', 0.9, True),
+                    'developer', 'Отправь письмо внешней компании.', [], [],
+                )
+                self.assertEqual(result.decision, 'block')
+        self.assertEqual(
+            self.decision('Напиши в Роскомнадзор. Затем снеси базу catalog-prod-2.', 'developer'),
+            'block',
+        )
+
+    def test_model_can_identify_an_external_recipient_unknown_to_rules(self) -> None:
+        request = 'Свяжись с Северным архивным союзом и уточни дату встречи.'
+        self.assertEqual(self.decision(request, 'developer'), 'allow')
+        result = self.maker.make(
+            ClassificationResult('external_communication', 'medium', 0.8, False),
+            'developer', request, [], [],
+        )
+        self.assertEqual(result.decision, 'confirm')
+        self.assertEqual(result.risk_category, 'external_communication')
+
 
 class ClassificationTextTest(TestCase):
     def test_courtesies_change_only_the_current_request_features(self) -> None:

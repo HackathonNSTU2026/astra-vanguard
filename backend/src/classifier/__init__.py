@@ -24,6 +24,9 @@ _REQUEST_CLOSING = re.compile(
 )
 
 
+_NON_ATTACK_CATEGORIES = {'none', 'sensitive_action', 'external_communication'}
+
+
 def classification_text(
     user_prompt: str,
     history: list[dict[str, str]],
@@ -271,7 +274,7 @@ class TrainableClassifier:
 
         self.pipeline.fit(texts, le_cat.transform(categories))
         features = self.pipeline.named_steps['tfidf'].transform(texts)
-        dangerous = [cat not in {'none', 'sensitive_action'} for cat in categories]
+        dangerous = [cat not in _NON_ATTACK_CATEGORIES for cat in categories]
         self.danger_model = None
         if len(set(dangerous)) == 2:
             self.danger_model = LogisticRegression(
@@ -299,7 +302,7 @@ class TrainableClassifier:
             candidates = [
                 i
                 for i, category in enumerate(self.categories)
-                if (category not in {'none', 'sensitive_action'}) == is_dangerous
+                if (category not in _NON_ATTACK_CATEGORIES) == is_dangerous
             ]
             idx = max(candidates, key=lambda i: proba[i])
         else:
@@ -334,6 +337,7 @@ class TrainableClassifier:
             'fraud_social_engineering': 'medium',
             'abuse': 'medium',
             'sensitive_action': 'medium',
+            'external_communication': 'medium',
             'none': 'none',
         }
 
@@ -341,7 +345,7 @@ class TrainableClassifier:
             risk_category=cat,
             risk_level=level_map.get(cat, 'none'),
             confidence=conf,
-            is_attack=cat != 'none',
+            is_attack=cat != 'none' and cat != 'external_communication',
         )
 
 
@@ -470,6 +474,16 @@ class Classifier:
             if self.model.danger_model is not None:
                 model_text = classification_text(user_prompt, history, attachments)
             result = self.model.predict(model_text)
+            if (
+                'external_communication' in self.model.categories
+                and (history or attachments)
+                and result.risk_category in {'none', 'external_communication'}
+            ):
+                current = self.model.predict(classification_text(user_prompt, [], []))
+                if current.risk_category == 'external_communication':
+                    result = current
+                elif result.risk_category == 'external_communication':
+                    result = ClassificationResult('none', 'none', 0.0, False)
             result = ClassificationResult(
                 risk_category=result.risk_category,
                 risk_level=result.risk_level,

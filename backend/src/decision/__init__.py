@@ -22,6 +22,22 @@ class Decision:
 class DecisionMaker:
     """Принимает решение allow/confirm/block на основе классификации и политики."""
 
+    _EXTERNAL_RECIPIENT = (
+        r'(?:роскомнадзор\w*|роспотребнадзор\w*|фнс|фсб|мвд|мчс|прокуратур\w*|'
+        r'федеральн\w*\s+служб\w*\s+безопасност\w*|налогов\w*\s+инспекц\w*|'
+        r'госорган\w*|государственн\w*\s+(?:орган\b|организаци\w*|ведомств\w*)|'
+        r'(?:внешн\w*|сторонн\w*)\s+(?:организац\w*|компан\w*|служб\w*|'
+        r'поставщик\w*|подрядчик\w*|партн[её]р\w*)|'
+        r'поставщик\w*|подрядчик\w*|регулятор\w*|'
+        r'(?:external|third[- ]party)\s+(?:organi[sz]ation|company|partner|team|vendor|supplier|contractor)|'
+        r'(?:the\s+)?(?:vendor|supplier|contractor|regulator)s?)'
+    )
+    _EXTERNAL_ADDRESS = r'[\w.+-]+@[\w-]+(?:\.[\w-]+)+'
+    _COMMUNICATION = (
+        r'(?:напиши(?:те)?|написать|отправ(?:ь(?:те)?|ить)|перешл(?:и(?:те)?|ать)|'
+        r'сообщ(?:и(?:те)?|ить)|уведом(?:ь(?:те)?|ить)|обрати(?:сь|тесь|ться)|'
+        r'ответ(?:ь(?:те)?|ить)|send|email|e-mail|contact|notify|forward|write\s+to|reply\s+to)'
+    )
     _SQL_OBJECT = r'(?:бд|базу(?:\s+данных)?|таблицу|схему|database|db|table|schema)'
     _SQL_DELETE = (
         r'\b(?:дропни|снеси|прибей|грохни|дропнуть|drop|delete|remove|удали)\s+'
@@ -122,7 +138,7 @@ class DecisionMaker:
                 requires_confirm=False,
             )
 
-        if advisory_request and cat not in self.policy.context_dependent:
+        if advisory_request and cat not in self.policy.context_dependent and cat != 'external_communication':
             return Decision(
                 decision='allow',
                 risk_level='none',
@@ -141,6 +157,15 @@ class DecisionMaker:
         # Authorization must not depend on the ML model recognizing the request.
         # Check every explicit operation in the current user message against policy.
         tools = self._infer_tools(action_text)
+        if cat == 'external_communication' and 'contact_external' not in tools:
+            tools.append('contact_external')
+        if tools == ['contact_external'] and cat in self.policy.context_dependent:
+            return Decision(
+                decision='block',
+                risk_level=level,
+                risk_category=cat,
+                explanation='Для запроса требуется отдельная проверка прав доступа.',
+            )
         resource = self._infer_resource(action_text)
         checked: list[ToolCheck] = []
         for tool in tools:
@@ -166,7 +191,11 @@ class DecisionMaker:
                 return Decision(
                     decision='confirm',
                     risk_level=level if level != 'none' else 'medium',
-                    risk_category='sensitive_action',
+                    risk_category=(
+                        'external_communication'
+                        if any(c.tool == 'contact_external' and c.requires_confirm for c in checked)
+                        else 'sensitive_action'
+                    ),
                     explanation='; '.join(c.reason for c in checked)
                     + '; действие требует явного подтверждения.',
                     requires_confirm=True,
@@ -215,6 +244,15 @@ class DecisionMaker:
             flags=re.IGNORECASE,
         )
         patterns = {
+            'contact_external': (
+                rf'\b{self._COMMUNICATION}\s+'
+                r'(?:(?:письмо|сообщение|жалобу|обращение|запрос|(?:an?\s+)?'
+                r'(?:e-?mail|letter|message|complaint|request))\s+)?'
+                r'(?:(?:в|во|на|к|to)\s+)?'
+                r'(?:(?:an?|the)\s+)?'
+                rf'(?:["«“]?{self._EXTERNAL_RECIPIENT}\b|{self._EXTERNAL_ADDRESS}\b|'
+                r'(?:компани\w*|организаци\w*|company)\s+["«“][^"»”\r\n]+["»”])'
+            ),
             'run_shell': (
                 r'\brun_shell\b|\bshell\b|командная\s+строка|'
                 r'(?:выполнить|выполни|запусти)\s+команду|'

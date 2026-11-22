@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte'
   import { SvelteMap, SvelteSet } from 'svelte/reactivity'
   import { jsonPost, request, type Decision } from './api'
+  import { messageHistory, needsRestatement } from './chatHistory'
 
   interface CheckResult {
     decision: Decision
@@ -125,13 +126,6 @@
     return last?.result.pending_id && !last.resolution ? last : undefined
   }
 
-  function messageHistory(chat: Chat) {
-    return chat.turns.flatMap((turn) => [
-      { role: 'user', content: turn.prompt },
-      { role: 'assistant', content: turn.result.explanation },
-    ])
-  }
-
   async function scrollToLatest(chatId: string) {
     await tick()
     if (workspace.activeId === chatId && transcript) {
@@ -218,6 +212,11 @@
       return
     }
 
+    if (needsRestatement(prompt, chat.turns)) {
+      errors.set(chat.id, 'Сформулируйте запрос полностью: предыдущее действие не было разрешено.')
+      return
+    }
+
     busy.add(chat.id)
     try {
       const result = await request<CheckResult>('/v1/check', jsonPost({
@@ -228,7 +227,7 @@
           user_id: userId,
           user_name: 'Demo User',
           system_prompt: 'Ты — DevOps-ассистент инженерной команды.',
-          history: messageHistory(chat),
+          history: messageHistory(chat.turns),
           attachments: readAttachments(chat.attachments),
         },
       }))
