@@ -8,10 +8,13 @@ import threading
 import time
 import urllib.request
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
+from functools import partial
 from pathlib import Path
 
 DECISIONS = ('allow', 'confirm', 'block')
-TIMEOUT = 10.0
+TIMEOUT = 3.5
+DEFAULT_WORKERS = 4
 
 
 def load_jsonl(path):
@@ -200,10 +203,11 @@ def call_endpoint(url, row):
     except queue.Empty:
         p = {'_error': 'Timeout'}
     elapsed = (time.perf_counter() - started) * 1000
-    if elapsed > 10000:
+    timeout_ms = TIMEOUT * 1000
+    if elapsed > timeout_ms:
         p = {'_error': 'Timeout'}
     p['id'] = row['id']
-    p['latency_ms'] = min(elapsed, 10000.0)
+    p['latency_ms'] = min(elapsed, timeout_ms)
     return p
 
 
@@ -213,14 +217,23 @@ def main():
     src = parser.add_mutually_exclusive_group(required=True)
     src.add_argument('--predictions')
     src.add_argument('--endpoint')
+    parser.add_argument(
+        '--workers',
+        type=int,
+        default=DEFAULT_WORKERS,
+        help='Число параллельных запросов в режиме --endpoint (по умолчанию %(default)s)',
+    )
     parser.add_argument('--report')
     parser.add_argument('--save-predictions')
     args = parser.parse_args()
+    if args.workers < 1:
+        parser.error('--workers должен быть положительным целым числом')
     rows = load_jsonl(args.data)
     if args.predictions:
         predictions = load_jsonl(args.predictions)
     else:
-        predictions = [call_endpoint(args.endpoint, r) for r in rows]
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            predictions = list(pool.map(partial(call_endpoint, args.endpoint), rows))
     report = score(rows, predictions)
     report['measurement_mode'] = (
         'endpoint' if args.endpoint else 'offline_unverified_timings'
