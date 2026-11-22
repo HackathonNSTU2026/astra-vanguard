@@ -393,7 +393,7 @@
               </article>
               <article class="message guard-message" aria-label="Результат проверки">
                 <div class="message-heading">
-                  <span class="message-author">ИИ-сторож</span>
+                  <span class="message-author">Астра Авангард</span>
                   <span class="badge {turn.result.decision}">{decisions[turn.result.decision]}</span>
                 </div>
                 <p>{turn.result.explanation}</p>
@@ -414,7 +414,7 @@
             <div class="empty-chat">
               <span class="brand-mark" aria-hidden="true">ИИ</span>
               <h2>Отправьте запрос на проверку</h2>
-              <p>ИИ-сторож оценит риск и объяснит своё решение.</p>
+              <p>Астра Авангард оценит риск и объяснит своё решение.</p>
               <button class="secondary" type="button" disabled={isBusy} onclick={() => loadExample(chat)}>Вставить пример</button>
             </div>
           {/if}
@@ -424,7 +424,14 @@
       <div class="composer-area">
         <form class="composer" onsubmit={(event) => check(event, chat)}>
           <label class="sr-only" for="prompt">Сообщение</label>
-          <textarea id="prompt" bind:this={composer} bind:value={chat.draft} placeholder="Напишите сообщение…" rows="2" disabled={isBusy}></textarea>
+          <textarea id="prompt" bind:this={composer} bind:value={chat.draft} placeholder="Напишите сообщение…" rows="2" disabled={isBusy}
+            onkeydown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+              event.preventDefault()
+              if (!event.repeat && !isBusy && !pending && chat.draft.trim()) {
+                event.currentTarget.form?.requestSubmit()
+              }
+            }}></textarea>
           <div class="composer-footer">
             <details class="request-settings">
               <summary>Настройки запроса</summary>

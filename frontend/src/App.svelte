@@ -33,14 +33,14 @@
 </script>
 
 <svelte:head>
-  <title>ИИ-сторож — {isAdmin ? 'администрирование' : 'чаты'}</title>
+  <title>Астра Авангард — {isAdmin ? 'администрирование' : 'чаты'}</title>
 </svelte:head>
 
 <header class="site-header">
   <div class="site-header-inner">
     <a class="brand" href="/">
       <span class="brand-mark" aria-hidden="true">ИИ</span>
-      ИИ-сторож
+      Астра Авангард
     </a>
 
     <nav aria-label="Разделы">

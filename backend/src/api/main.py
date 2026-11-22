@@ -25,7 +25,7 @@ _policy_path = settings.policy_path
 _adapter = DemoAdapter(settings.adapter_path)
 _sessions = SessionManager(settings.sessions_path)
 
-app = FastAPI(title='ИИ-сторож API', version='1.0.0', docs_url=None, redoc_url=None)
+app = FastAPI(title='Астра Авангард API', version='1.0.0', docs_url=None, redoc_url=None)
 
 MAX_BODY_SIZE = 1048576  # 1 MiB
 

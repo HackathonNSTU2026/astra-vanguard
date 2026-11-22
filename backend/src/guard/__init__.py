@@ -29,7 +29,7 @@ class CheckResponse:
 
 
 class Guard:
-    """ИИ-сторож: основной конвейер проверки входящих запросов."""
+    """Астра Авангард: основной конвейер проверки входящих запросов."""
 
     def __init__(
         self, settings: Settings | None = None, model_dir: str | Path | None = None
