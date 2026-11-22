@@ -9,6 +9,8 @@ on:
       - 'deploy/**'
       - '.dockerignore'
       - '.github/workflows/deploy.yml'
+      - '.github/workflows/frontend.yml'
+      - '.github/workflows/backend.yml'
   pull_request:
     paths: *deploy_paths
 
@@ -20,6 +22,12 @@ defaults:
     shell: bash
 
 jobs:
+  frontend:
+    uses: ./.github/workflows/frontend.yml
+
+  backend:
+    uses: ./.github/workflows/backend.yml
+
   validate:
     runs-on: ubuntu-latest
     steps:
@@ -33,7 +41,7 @@ jobs:
 
   deploy:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: validate
+    needs: [frontend, backend, validate]
     runs-on: ubuntu-latest
     concurrency:
       group: astra-vanguard-deploy
