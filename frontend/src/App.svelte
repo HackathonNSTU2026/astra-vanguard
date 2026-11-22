@@ -32,10 +32,6 @@
   }
 </script>
 
-<svelte:head>
-  <title>Астра Авангард — {isAdmin ? 'администрирование' : 'чаты'}</title>
-</svelte:head>
-
 <header class="site-header">
   <div class="site-header-inner">
     <a class="brand" href="/">
